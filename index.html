@@ -3,105 +3,123 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Todo with Notifications</title>
+    <title>Persistent Task Scheduler</title>
     <style>
-        body { font-family: sans-serif; max-width: 500px; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }
-        .input-group { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 8px; }
-        input, button { padding: 8px; border-radius: 4px; border: 1px solid #ccc; }
-        button { background-color: #2563eb; color: white; cursor: pointer; border: none; }
-        button:hover { background-color: #1d4ed8; }
-        .task-item { border-bottom: 1px solid #eee; padding: 10px 0; display: flex; justify-content: space-between; align-items: center; }
-        .status { font-size: 0.8rem; padding: 2px 6px; border-radius: 10px; background: #e5e7eb; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 500px; margin: 2rem auto; padding: 0 1rem; background-color: #f4f4f9; }
+        .container { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .input-group { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+        input, button { padding: 10px; border-radius: 6px; border: 1px solid #ddd; }
+        button { background-color: #2563eb; color: white; cursor: pointer; border: none; font-weight: bold; }
+        button.delete-btn { background-color: #ef4444; padding: 5px 10px; font-size: 0.8rem; }
+        .task-item { border-bottom: 1px solid #eee; padding: 12px 0; display: flex; justify-content: space-between; align-items: center; }
+        .task-info { flex-grow: 1; }
+        .status-badge { font-size: 0.75rem; color: #666; background: #f0f0f0; padding: 2px 8px; border-radius: 12px; }
     </style>
 </head>
 <body>
 
-    <h2>Task Scheduler</h2>
+<div class="container">
+    <h2>Task Notifications</h2>
     
     <div class="input-group">
-        <input type="text" id="taskName" placeholder="Task description...">
+        <input type="text" id="taskName" placeholder="What needs to be done?">
         <input type="datetime-local" id="taskTime">
-        <button onclick="addTask()">Add Task</button>
+        <button onclick="addTask()">Save Task</button>
     </div>
 
     <div id="taskList"></div>
+</div>
 
-    <script>
-        let tasks = [];
+<script>
+    // Load tasks from localStorage on startup, or default to empty array
+    let tasks = JSON.parse(localStorage.getItem('myTodoTasks')) || [];
 
-        // Request notification permission on load
-        window.onload = () => {
-            if ("Notification" in window) {
-                Notification.requestPermission();
-            }
+    window.onload = () => {
+        if ("Notification" in window) {
+            Notification.requestPermission();
+        }
+        renderTasks();
+    };
+
+    function saveToDisk() {
+        localStorage.setItem('myTodoTasks', JSON.stringify(tasks));
+    }
+
+    function addTask() {
+        const name = document.getElementById('taskName').value;
+        const time = document.getElementById('taskTime').value;
+
+        if (!name || !time) return alert("Please fill in both fields");
+
+        const task = {
+            id: Date.now(),
+            name,
+            startTime: new Date(time).getTime(),
         };
 
-        function addTask() {
-            const name = document.getElementById('taskName').value;
-            const time = document.getElementById('taskTime').value;
+        tasks.push(task);
+        saveToDisk();
+        renderTasks();
+        
+        // Reset inputs
+        document.getElementById('taskName').value = '';
+        document.getElementById('taskTime').value = '';
+    }
 
-            if (!name || !time) return alert("Please fill in both fields");
+    function deleteTask(id) {
+        tasks = tasks.filter(t => t.id !== id);
+        saveToDisk();
+        renderTasks();
+    }
 
-            const task = {
-                id: Date.now(),
-                name,
-                startTime: new Date(time).getTime(),
-                notified: false
-            };
-
-            tasks.push(task);
-            renderTasks();
-            document.getElementById('taskName').value = '';
+    function renderTasks() {
+        const list = document.getElementById('taskList');
+        if (tasks.length === 0) {
+            list.innerHTML = '<p style="color: #999; text-align: center;">No tasks scheduled.</p>';
+            return;
         }
 
-        function renderTasks() {
-            const list = document.getElementById('taskList');
-            list.innerHTML = tasks.map(t => `
-                <div class="task-item">
-                    <div>
-                        <strong>${t.name}</strong><br>
-                        <small>${new Date(t.startTime).toLocaleString()}</small>
-                    </div>
-                    <span class="status">Pending</span>
+        list.innerHTML = tasks.sort((a,b) => a.startTime - b.startTime).map(t => `
+            <div class="task-item">
+                <div class="task-info">
+                    <strong>${t.name}</strong><br>
+                    <small>${new Date(t.startTime).toLocaleString()}</small>
                 </div>
-            `).join('');
-        }
+                <button class="delete-btn" onclick="deleteTask(${t.id})">Remove</button>
+            </div>
+        `).join('');
+    }
 
-        // Core logic: Check tasks every second
-        setInterval(() => {
-            const now = Date.now();
+    // Checking logic for notifications
+    setInterval(() => {
+        const now = Date.now();
+        const tenMinutesInMs = 10 * 60 * 1000;
 
-            tasks.forEach(task => {
-                const timeLeft = task.startTime - now;
-                const tenMinutesInMs = 10 * 60 * 1000;
+        tasks.forEach(task => {
+            const timeLeft = task.startTime - now;
 
-                // Trigger notification when within the 10-minute window
-                if (timeLeft <= tenMinutesInMs && timeLeft > 0) {
-                    showCountdownNotification(task, timeLeft);
-                }
-            });
-        }, 1000);
+            // Trigger notification only if within the 10-minute window and not yet started
+            if (timeLeft <= tenMinutesInMs && timeLeft > 0) {
+                sendUpdate(task, timeLeft);
+            }
+        });
+    }, 1000);
 
-        function showCountdownNotification(task, timeLeft) {
-            if (Notification.permission !== "granted") return;
+    function sendUpdate(task, timeLeft) {
+        if (Notification.permission !== "granted") return;
 
-            const secondsTotal = Math.floor(timeLeft / 1000);
-            const mins = Math.floor(secondsTotal / 60);
-            const secs = secondsTotal % 60;
-            
-            const timeString = `${mins}m ${secs}s`;
-
-            // Using a unique tag per task prevents multiple notifications 
-            // from stacking for the same task; it updates the existing one instead.
-            const options = {
-                body: `Starts in: ${timeString}`,
-                tag: `task-${task.id}`, 
-                renotify: false, // Set to true if you want it to vibrate/sound every second (not recommended)
-                silent: true     // Keep it quiet since it updates every second
-            };
-
-            new Notification(`Upcoming Task: ${task.name}`, options);
-        }
-    </script>
+        const totalSeconds = Math.floor(timeLeft / 1000);
+        const mins = Math.floor(totalSeconds / 60);
+        const secs = totalSeconds % 60;
+        
+        // Use the 'tag' property to update the existing notification for this specific task
+        new Notification(`Upcoming: ${task.name}`, {
+            body: `Starts in ${mins}m ${secs}s`,
+            tag: `task-${task.id}`,
+            silent: true,
+            icon: 'https://cdn-icons-png.flaticon.com/512/2098/2098402.png' // Optional icon
+        });
+    }
+</script>
 </body>
 </html>
