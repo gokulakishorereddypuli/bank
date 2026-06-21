@@ -1,0 +1,83 @@
+{
+  "_comment": "This file documents the data shape that the app auto-seeds into IndexedDB on first run (js/db.js -> seedIfEmpty). It is not loaded directly by the app; it's a reference for the storage schema.",
+
+  "customers": [
+    {
+      "id": "id_example_admin",
+      "name": "Bank Admin",
+      "email": "admin@bank.com",
+      "phone": "9999900000",
+      "passwordHash": "sha256-hex-of-admin123",
+      "role": "admin",
+      "status": "active",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "id_example_customer",
+      "name": "Asha Rao",
+      "email": "demo@bank.com",
+      "phone": "9876543210",
+      "passwordHash": "sha256-hex-of-demo123",
+      "role": "customer",
+      "status": "active",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+
+  "accounts": [
+    {
+      "id": "id_example_acc1",
+      "accountNumber": "AC1234567890",
+      "customerId": "id_example_customer",
+      "type": "savings",
+      "balance": 45250,
+      "status": "active",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+
+  "transactions": [
+    {
+      "id": "id_example_tx1",
+      "refNo": "TXNABC123XYZ",
+      "accountId": "id_example_acc1",
+      "type": "CR",
+      "amount": 50000,
+      "balanceAfter": 50000,
+      "description": "Initial deposit",
+      "relatedAccountId": null,
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+
+  "loans": [
+    {
+      "id": "id_example_loan1",
+      "customerId": "id_example_customer",
+      "type": "personal",
+      "principal": 200000,
+      "rateAPR": 12,
+      "tenureMonths": 24,
+      "emi": 9415,
+      "status": "approved",
+      "outstandingPrincipal": 160000,
+      "appliedAt": "2026-01-01T00:00:00.000Z",
+      "approvedAt": "2026-01-02T00:00:00.000Z"
+    }
+  ],
+
+  "creditcards": [
+    {
+      "id": "id_example_card1",
+      "customerId": "id_example_customer",
+      "cardNumber": "1234 5678 9012 3456",
+      "limit": 100000,
+      "outstanding": 8450,
+      "status": "active",
+      "billCycleDay": 5,
+      "currentBill": 8450,
+      "dueDate": "2026-02-01T00:00:00.000Z",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    }
+  ]
+}
