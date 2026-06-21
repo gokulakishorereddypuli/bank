@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin · SecureTrust Bank</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="appShell"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/db.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/accounts.js"></script>
+<script src="js/transactions.js"></script>
+<script src="js/loans.js"></script>
+<script src="js/creditcards.js"></script>
+<script>
+let ADMIN = null;
+let CUSTOMERS = [], ACCOUNTS = [], TXNS = [], LOANS = [], CARDS = [];
+
+async function loadAllData() {
+  CUSTOMERS = await Store.getAll('customers');
+  ACCOUNTS = await Accounts.all();
+  TXNS = await Transactions.all();
+  LOANS = await Loans.all();
+  CARDS = await CreditCards.all();
+}
+function custName(id) { const c = CUSTOMERS.find(x => x.id === id); return c ? c.name : '—'; }
+function accNo(id) { const a = ACCOUNTS.find(x => x.id === id); return a ? a.accountNumber : '—'; }
+
+function section(title, bodyHtml) {
+  return `<div class="card-soft p-3 mb-4"><h6 class="mb-3">${title}</h6>${bodyHtml}</div>`;
+}
+
+async function renderOverview() {
+  const totalDeposits = ACCOUNTS.reduce((s, a) => s + a.balance, 0);
+  const pendingLoans = LOANS.filter(l => l.status === 'pending').length;
+  const pendingCards = CARDS.filter(c => c.status === 'pending').length;
+  return `
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-lg-3"><div class="stat-card"><div class="label">Customers</div><div class="value">${CUSTOMERS.filter(c=>c.role==='customer').length}</div></div></div>
+      <div class="col-6 col-lg-3"><div class="stat-card"><div class="label">Total Deposits</div><div class="value">${Util.formatCurrency(totalDeposits)}</div></div></div>
+      <div class="col-6 col-lg-3"><div class="stat-card"><div class="label">Pending Loans</div><div class="value">${pendingLoans}</div></div></div>
+      <div class="col-6 col-lg-3"><div class="stat-card"><div class="label">Pending Cards</div><div class="value">${pendingCards}</div></div></div>
+    </div>`;
+}
+
+function renderCustomersSection() {
+  return section('Customer Search & Management', `
+    <input type="text" class="form-control form-control-sm mb-3" id="custSearch" placeholder="Search by name or email…">
+    <div class="table-responsive"><table class="table table-soft mb-0">
+      <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Status</th><th>Joined</th><th></th></tr></thead>
+      <tbody id="custTbody"></tbody>
+    </table></div>`);
+}
+function renderCustomerRows(filter = '') {
+  const tbody = document.getElementById('custTbody');
+  if (!tbody) return;
+  const f = filter.toLowerCase();
+  const list = CUSTOMERS.filter(c => c.role === 'customer' && (c.name.toLowerCase().includes(f) || c.email.toLowerCase().includes(f)));
+  tbody.innerHTML = list.length ? list.map(c => `
+    <tr>
+      <td>${Util.escapeHtml(c.name)}</td><td>${Util.escapeHtml(c.email)}</td><td>${Util.escapeHtml(c.phone)}</td>
+      <td><span class="badge badge-${c.status === 'active' ? 'active' : 'inactive'}">${c.status}</span></td>
+      <td>${Util.formatDate(c.createdAt, false)}</td>
+      <td><button class="btn btn-sm btn-outline-secondary toggle-cust" data-id="${c.id}" data-status="${c.status}">${c.status === 'active' ? 'Deactivate' : 'Activate'}</button></td>
+    </tr>`).join('') : `<tr><td colspan="6" class="empty-state">No customers found</td></tr>`;
+  tbody.querySelectorAll('.toggle-cust').forEach(btn => btn.addEventListener('click', async () => {
+    const c = await Store.get('customers', btn.dataset.id);
+    c.status = btn.dataset.status === 'active' ? 'inactive' : 'active';
+    await Store.put('customers', c);
+    Util.toast('Customer status updated.');
+    await loadAllData(); renderCustomerRows(document.getElementById('custSearch').value);
+  }));
+}
+
+function renderAccountsSection() {
+  return section('Account Management', `
+    <div class="table-responsive"><table class="table table-soft mb-0">
+      <thead><tr><th>Account No.</th><th>Customer</th><th>Type</th><th>Balance</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        ${ACCOUNTS.length ? ACCOUNTS.map(a => `
+          <tr>
+            <td class="mono">${a.accountNumber}</td><td>${Util.escapeHtml(custName(a.customerId))}</td>
+            <td class="text-capitalize">${a.type}</td><td>${Util.formatCurrency(a.balance)}</td>
+            <td><span class="badge badge-${a.status === 'active' ? 'active' : 'inactive'}">${a.status}</span></td>
+            <td><button class="btn btn-sm btn-outline-secondary toggle-acc" data-id="${a.id}" data-status="${a.status}">${a.status === 'active' ? 'Deactivate' : 'Activate'}</button></td>
+          </tr>`).join('') : `<tr><td colspan="6" class="empty-state">No accounts</td></tr>`}
+      </tbody>
+    </table></div>`);
+}
+
+function renderTransactionsSection() {
+  const recent = TXNS.slice(0, 100);
+  return section('Transaction Monitoring (most recent 100)', `
+    <div class="table-responsive"><table class="table table-soft mb-0">
+      <thead><tr><th>Date</th><th>Ref No</th><th>Account</th><th>Type</th><th>Amount</th><th>Description</th></tr></thead>
+      <tbody>
+        ${recent.length ? recent.map(t => `
+          <tr>
+            <td>${Util.formatDate(t.createdAt)}</td><td class="mono small">${t.refNo}</td>
+            <td class="mono">${accNo(t.accountId)}</td>
+            <td><span class="badge badge-${t.type.toLowerCase()}">${t.type}</span></td>
+            <td>${Util.formatCurrency(t.amount)}</td><td>${Util.escapeHtml(t.description)}</td>
+          </tr>`).join('') : `<tr><td colspan="6" class="empty-state">No transactions</td></tr>`}
+      </tbody>
+    </table></div>`);
+}
+
+function renderLoansSection() {
+  return section('Loan Approval Workflow', `
+    <div class="table-responsive"><table class="table table-soft mb-0">
+      <thead><tr><th>Customer</th><th>Type</th><th>Principal</th><th>EMI</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        ${LOANS.length ? LOANS.map(l => `
+          <tr>
+            <td>${Util.escapeHtml(custName(l.customerId))}</td><td class="text-capitalize">${l.type}</td>
+            <td>${Util.formatCurrency(l.principal)}</td><td>${Util.formatCurrency(l.emi)}</td>
+            <td><span class="badge badge-${l.status}">${l.status}</span></td>
+            <td>${l.status === 'pending' ? `
+              <button class="btn btn-sm btn-teal approve-loan" data-id="${l.id}">Approve</button>
+              <button class="btn btn-sm btn-outline-danger reject-loan" data-id="${l.id}">Reject</button>` : '—'}</td>
+          </tr>`).join('') : `<tr><td colspan="6" class="empty-state">No loan applications</td></tr>`}
+      </tbody>
+    </table></div>`);
+}
+
+function renderCardsSection() {
+  return section('Credit Card Approval', `
+    <div class="table-responsive"><table class="table table-soft mb-0">
+      <thead><tr><th>Customer</th><th>Card No.</th><th>Limit</th><th>Outstanding</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        ${CARDS.length ? CARDS.map(c => `
+          <tr>
+            <td>${Util.escapeHtml(custName(c.customerId))}</td><td class="mono">${c.cardNumber}</td>
+            <td>${Util.formatCurrency(c.limit)}</td><td>${Util.formatCurrency(c.outstanding)}</td>
+            <td><span class="badge badge-${c.status === 'active' ? 'active' : c.status}">${c.status}</span></td>
+            <td>${c.status === 'pending' ? `
+              <button class="btn btn-sm btn-teal approve-card" data-id="${c.id}">Approve</button>
+              <button class="btn btn-sm btn-outline-danger reject-card" data-id="${c.id}">Reject</button>` :
+              (c.status === 'active' ? `<button class="btn btn-sm btn-outline-secondary bill-card" data-id="${c.id}">Generate Bill</button>` : '—')}</td>
+          </tr>`).join('') : `<tr><td colspan="6" class="empty-state">No credit card requests</td></tr>`}
+      </tbody>
+    </table></div>`);
+}
+
+function renderReportsSection() {
+  return section('Reports Dashboard', `
+    <div class="row g-3">
+      <div class="col-lg-6"><canvas id="loanStatusChart" height="180"></canvas></div>
+      <div class="col-lg-6"><canvas id="accTypeChart" height="180"></canvas></div>
+    </div>`);
+}
+
+function drawReportCharts() {
+  const loanStatusCtx = document.getElementById('loanStatusChart');
+  if (loanStatusCtx) {
+    const statuses = ['pending', 'approved', 'rejected', 'closed'];
+    new Chart(loanStatusCtx, {
+      type: 'bar',
+      data: { labels: statuses, datasets: [{ label: 'Loans', data: statuses.map(s => LOANS.filter(l => l.status === s).length), backgroundColor: '#0B2545' }] },
+      options: { plugins: { legend: { display: false }, title: { display: true, text: 'Loans by status' } } }
+    });
+  }
+  const accTypeCtx = document.getElementById('accTypeChart');
+  if (accTypeCtx) {
+    const savings = ACCOUNTS.filter(a => a.type === 'savings').reduce((s, a) => s + a.balance, 0);
+    const current = ACCOUNTS.filter(a => a.type === 'current').reduce((s, a) => s + a.balance, 0);
+    new Chart(accTypeCtx, {
+      type: 'doughnut',
+      data: { labels: ['Savings', 'Current'], datasets: [{ data: [savings, current], backgroundColor: ['#2EC4B6', '#0B2545'] }] },
+      options: { plugins: { title: { display: true, text: 'Deposits by account type' } } }
+    });
+  }
+}
+
+async function renderAdmin() {
+  await loadAllData();
+  const content = document.getElementById('pageContent');
+  content.innerHTML =
+    (await renderOverview()) +
+    `<div id="customers">${renderCustomersSection()}</div>` +
+    `<div id="accounts">${renderAccountsSection()}</div>` +
+    `<div id="transactions">${renderTransactionsSection()}</div>` +
+    `<div id="loans">${renderLoansSection()}</div>` +
+    `<div id="creditcards">${renderCardsSection()}</div>` +
+    `<div id="reports">${renderReportsSection()}</div>`;
+
+  renderCustomerRows();
+  drawReportCharts();
+  bindActions();
+
+  if (window.location.hash) {
+    const el = document.querySelector(window.location.hash);
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  }
+}
+
+function bindActions() {
+  document.getElementById('custSearch').addEventListener('input', (e) => renderCustomerRows(e.target.value));
+
+  document.querySelectorAll('.toggle-acc').forEach(btn => btn.addEventListener('click', async () => {
+    await Accounts.setStatus(btn.dataset.id, btn.dataset.status === 'active' ? 'inactive' : 'active');
+    Util.toast('Account status updated.');
+    await renderAdmin();
+  }));
+  document.querySelectorAll('.approve-loan').forEach(btn => btn.addEventListener('click', async () => {
+    await Loans.approve(btn.dataset.id); Util.toast('Loan approved.'); await renderAdmin();
+  }));
+  document.querySelectorAll('.reject-loan').forEach(btn => btn.addEventListener('click', async () => {
+    await Loans.reject(btn.dataset.id); Util.toast('Loan rejected.', 'warning'); await renderAdmin();
+  }));
+  document.querySelectorAll('.approve-card').forEach(btn => btn.addEventListener('click', async () => {
+    await CreditCards.approve(btn.dataset.id); Util.toast('Credit card approved.'); await renderAdmin();
+  }));
+  document.querySelectorAll('.reject-card').forEach(btn => btn.addEventListener('click', async () => {
+    await CreditCards.reject(btn.dataset.id); Util.toast('Credit card rejected.', 'warning'); await renderAdmin();
+  }));
+  document.querySelectorAll('.bill-card').forEach(btn => btn.addEventListener('click', async () => {
+    await CreditCards.generateBill(btn.dataset.id); Util.toast('Bill generated.'); await renderAdmin();
+  }));
+}
+
+(async function init() {
+  await openDB();
+  ADMIN = await Auth.requireAdmin();
+  if (!ADMIN) return;
+  renderShell(ADMIN, 'Admin Console');
+  await renderAdmin();
+  window.addEventListener('hashchange', () => {
+    const el = document.querySelector(window.location.hash);
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  });
+})();
+</script>
+</body>
+</html>

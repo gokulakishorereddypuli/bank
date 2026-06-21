@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Transactions · SecureTrust Bank</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="appShell"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/db.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/accounts.js"></script>
+<script src="js/transactions.js"></script>
+<script>
+let CURRENT_USER = null, ACCOUNTS = [];
+
+function accOptions(selectedId) {
+  return ACCOUNTS.map(a => `<option value="${a.id}" ${a.id === selectedId ? 'selected' : ''}>${a.accountNumber} — ${a.type} (${Util.formatCurrency(a.balance)})</option>`).join('');
+}
+
+async function renderHistory(accountId) {
+  const tbody = document.getElementById('txTbody');
+  const list = await Transactions.history(accountId, 50);
+  tbody.innerHTML = list.length ? list.map(t => `
+    <tr>
+      <td>${Util.formatDate(t.createdAt)}</td>
+      <td class="mono small">${t.refNo}</td>
+      <td>${Util.escapeHtml(t.description)}</td>
+      <td><span class="badge badge-${t.type.toLowerCase()}">${t.type}</span></td>
+      <td class="text-end">${Util.formatCurrency(t.amount)}</td>
+      <td class="text-end mono">${Util.formatCurrency(t.balanceAfter)}</td>
+    </tr>`).join('') : `<tr><td colspan="6" class="empty-state">No transactions for this account</td></tr>`;
+}
+
+async function refreshBalances() {
+  ACCOUNTS = await Accounts.listForCustomer(CURRENT_USER.id);
+  ['depositAcc', 'withdrawAcc', 'transferAcc', 'historyAcc'].forEach(id => {
+    const el = document.getElementById(id);
+    const prev = el.value;
+    el.innerHTML = accOptions(prev);
+  });
+}
+
+(async function init() {
+  await openDB();
+  CURRENT_USER = await Auth.requireAuth();
+  if (!CURRENT_USER) return;
+  if (CURRENT_USER.role === 'admin') { window.location.href = 'admin.html'; return; }
+  renderShell(CURRENT_USER, 'Transactions');
+
+  ACCOUNTS = await Accounts.listForCustomer(CURRENT_USER.id);
+  const params = new URLSearchParams(window.location.search);
+  const preselect = params.get('acc') || (ACCOUNTS[0] && ACCOUNTS[0].id);
+
+  if (!ACCOUNTS.length) {
+    document.getElementById('pageContent').innerHTML = `<div class="card-soft empty-state">Open an account first to start transacting.</div>`;
+    return;
+  }
+
+  document.getElementById('pageContent').innerHTML = `
+    <ul class="nav nav-pills mb-3" id="txTabs">
+      <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#depositTab">Deposit</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#withdrawTab">Withdraw</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#transferTab">Transfer</button></li>
+    </ul>
+    <div class="tab-content mb-4">
+      <div class="tab-pane fade show active" id="depositTab">
+        <div class="card-soft p-3">
+          <div id="depositAlert"></div>
+          <div class="row g-2 align-items-end">
+            <div class="col-md-5"><label class="form-label small">Account</label><select class="form-select" id="depositAcc">${accOptions(preselect)}</select></div>
+            <div class="col-md-4"><label class="form-label small">Amount (₹)</label><input type="number" min="1" step="0.01" class="form-control" id="depositAmt"></div>
+            <div class="col-md-3"><button class="btn btn-teal w-100" id="depositBtn">Deposit (CR)</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="tab-pane fade" id="withdrawTab">
+        <div class="card-soft p-3">
+          <div id="withdrawAlert"></div>
+          <div class="row g-2 align-items-end">
+            <div class="col-md-5"><label class="form-label small">Account</label><select class="form-select" id="withdrawAcc">${accOptions(preselect)}</select></div>
+            <div class="col-md-4"><label class="form-label small">Amount (₹)</label><input type="number" min="1" step="0.01" class="form-control" id="withdrawAmt"></div>
+            <div class="col-md-3"><button class="btn btn-navy w-100" id="withdrawBtn">Withdraw (DR)</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="tab-pane fade" id="transferTab">
+        <div class="card-soft p-3">
+          <div id="transferAlert"></div>
+          <div class="row g-2 align-items-end">
+            <div class="col-md-3"><label class="form-label small">From account</label><select class="form-select" id="transferAcc">${accOptions(preselect)}</select></div>
+            <div class="col-md-3"><label class="form-label small">To account number</label><input type="text" class="form-control" id="transferTo" placeholder="AC...."></div>
+            <div class="col-md-3"><label class="form-label small">Amount (₹)</label><input type="number" min="1" step="0.01" class="form-control" id="transferAmt"></div>
+            <div class="col-md-3"><button class="btn btn-navy w-100" id="transferBtn">Transfer</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card-soft p-3">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="mb-0">Transaction history</h6>
+        <select class="form-select form-select-sm" style="width:auto;" id="historyAcc">${accOptions(preselect)}</select>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-soft mb-0">
+          <thead><tr><th>Date</th><th>Ref No</th><th>Description</th><th>Type</th><th class="text-end">Amount</th><th class="text-end">Balance</th></tr></thead>
+          <tbody id="txTbody"></tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  await renderHistory(preselect);
+  document.getElementById('historyAcc').addEventListener('change', (e) => renderHistory(e.target.value));
+
+  document.getElementById('depositBtn').addEventListener('click', async () => {
+    const alertBox = document.getElementById('depositAlert'); alertBox.innerHTML = '';
+    try {
+      await Transactions.deposit(document.getElementById('depositAcc').value, document.getElementById('depositAmt').value);
+      Util.toast('Deposit successful.');
+      document.getElementById('depositAmt').value = '';
+      await refreshBalances();
+      await renderHistory(document.getElementById('historyAcc').value);
+    } catch (err) { alertBox.innerHTML = `<div class="alert alert-danger py-2 small">${Util.escapeHtml(err.message)}</div>`; }
+  });
+
+  document.getElementById('withdrawBtn').addEventListener('click', async () => {
+    const alertBox = document.getElementById('withdrawAlert'); alertBox.innerHTML = '';
+    try {
+      await Transactions.withdraw(document.getElementById('withdrawAcc').value, document.getElementById('withdrawAmt').value);
+      Util.toast('Withdrawal successful.');
+      document.getElementById('withdrawAmt').value = '';
+      await refreshBalances();
+      await renderHistory(document.getElementById('historyAcc').value);
+    } catch (err) { alertBox.innerHTML = `<div class="alert alert-danger py-2 small">${Util.escapeHtml(err.message)}</div>`; }
+  });
+
+  document.getElementById('transferBtn').addEventListener('click', async () => {
+    const alertBox = document.getElementById('transferAlert'); alertBox.innerHTML = '';
+    try {
+      const res = await Transactions.transfer(
+        document.getElementById('transferAcc').value,
+        document.getElementById('transferTo').value,
+        document.getElementById('transferAmt').value
+      );
+      Util.toast(`Transfer successful. Ref: ${res.refNo}`);
+      document.getElementById('transferAmt').value = '';
+      document.getElementById('transferTo').value = '';
+      await refreshBalances();
+      await renderHistory(document.getElementById('historyAcc').value);
+    } catch (err) { alertBox.innerHTML = `<div class="alert alert-danger py-2 small">${Util.escapeHtml(err.message)}</div>`; }
+  });
+})();
+</script>
+</body>
+</html>

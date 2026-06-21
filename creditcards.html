@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Credit Cards · SecureTrust Bank</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+<link rel="stylesheet" href="css/style.css">
+<style>
+.cc-visual{border-radius:16px;background:linear-gradient(135deg,#0B2545,#1B9C90);color:#fff;padding:1.4rem;min-height:170px;display:flex;flex-direction:column;justify-content:space-between;}
+.cc-visual .num{font-family:ui-monospace,monospace;font-size:1.15rem;letter-spacing:2px;}
+</style>
+</head>
+<body>
+<div id="appShell"></div>
+
+<div class="modal fade" id="requestCardModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Request a credit card</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div id="cardAlert"></div>
+        <label class="form-label small fw-semibold">Requested credit limit (₹)</label>
+        <input type="number" min="10000" max="1000000" value="100000" class="form-control" id="reqLimit">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-navy" id="requestCardBtn">Submit Request</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="payBillModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Make a payment</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div id="payAlert"></div>
+        <p class="small text-muted mb-2">Outstanding: <span id="payOutstanding" class="fw-semibold"></span></p>
+        <label class="form-label small fw-semibold">Payment amount (₹)</label>
+        <input type="number" min="1" class="form-control" id="payAmount">
+        <input type="hidden" id="payCardId">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-navy" id="payBillBtn">Pay Now</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/db.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/creditcards.js"></script>
+<script>
+let CURRENT_USER = null;
+
+async function loadCards() {
+  const cards = await CreditCards.listForCustomer(CURRENT_USER.id);
+  const hasBlocking = cards.some(c => ['pending', 'approved', 'active'].includes(c.status));
+  document.getElementById('pageContent').innerHTML = `
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <p class="text-muted mb-0 small">Request, manage and pay your credit card bills</p>
+      <button class="btn btn-teal btn-sm" data-bs-toggle="modal" data-bs-target="#requestCardModal" ${hasBlocking ? 'disabled' : ''}><i class="bi bi-plus-lg"></i> Request Card</button>
+    </div>
+    <div class="row g-3" id="cardGrid"></div>
+  `;
+  const grid = document.getElementById('cardGrid');
+  if (!cards.length) {
+    grid.innerHTML = `<div class="col-12"><div class="card-soft empty-state"><i class="bi bi-credit-card-2-front fs-2 mb-2 d-block"></i>No credit card requests yet.</div></div>`;
+    return;
+  }
+  for (const c of cards) {
+    const col = document.createElement('div');
+    col.className = 'col-md-6 col-xl-4';
+    col.innerHTML = `
+      <div class="cc-visual mb-2">
+        <div class="d-flex justify-content-between">
+          <span class="small">SecureTrust</span>
+          <span class="badge badge-${c.status === 'active' ? 'active' : c.status}">${c.status}</span>
+        </div>
+        <div class="num">${c.cardNumber}</div>
+        <div class="d-flex justify-content-between small">
+          <span>Limit: ${Util.formatCurrency(c.limit)}</span>
+        </div>
+      </div>
+      <div class="card-soft p-3">
+        <div class="d-flex justify-content-between small mb-1"><span class="text-muted">Outstanding</span><span class="fw-semibold">${Util.formatCurrency(c.outstanding)}</span></div>
+        <div class="d-flex justify-content-between small mb-1"><span class="text-muted">Current bill</span><span class="fw-semibold">${Util.formatCurrency(c.currentBill)}</span></div>
+        <div class="d-flex justify-content-between small mb-3"><span class="text-muted">Due date</span><span class="fw-semibold">${c.dueDate ? Util.formatDate(c.dueDate, false) : '—'}</span></div>
+        ${c.status === 'active' ? `<button class="btn btn-sm btn-navy w-100 pay-btn" data-id="${c.id}" data-out="${c.outstanding}">Pay Bill</button>` : ''}
+      </div>`;
+    grid.appendChild(col);
+  }
+  document.querySelectorAll('.pay-btn').forEach(btn => btn.addEventListener('click', () => {
+    document.getElementById('payCardId').value = btn.dataset.id;
+    document.getElementById('payOutstanding').textContent = Util.formatCurrency(btn.dataset.out);
+    document.getElementById('payAlert').innerHTML = '';
+    document.getElementById('payAmount').value = '';
+    new bootstrap.Modal(document.getElementById('payBillModal')).show();
+  }));
+}
+
+(async function init() {
+  await openDB();
+  CURRENT_USER = await Auth.requireAuth();
+  if (!CURRENT_USER) return;
+  if (CURRENT_USER.role === 'admin') { window.location.href = 'admin.html'; return; }
+  renderShell(CURRENT_USER, 'Credit Cards');
+  await loadCards();
+
+  document.getElementById('requestCardBtn').addEventListener('click', async () => {
+    const alertBox = document.getElementById('cardAlert'); alertBox.innerHTML = '';
+    try {
+      await CreditCards.request(CURRENT_USER.id, document.getElementById('reqLimit').value);
+      bootstrap.Modal.getInstance(document.getElementById('requestCardModal')).hide();
+      Util.toast('Credit card request submitted.');
+      await loadCards();
+    } catch (err) { alertBox.innerHTML = `<div class="alert alert-danger py-2 small">${Util.escapeHtml(err.message)}</div>`; }
+  });
+
+  document.getElementById('payBillBtn').addEventListener('click', async () => {
+    const alertBox = document.getElementById('payAlert'); alertBox.innerHTML = '';
+    try {
+      await CreditCards.makePayment(document.getElementById('payCardId').value, document.getElementById('payAmount').value);
+      bootstrap.Modal.getInstance(document.getElementById('payBillModal')).hide();
+      Util.toast('Payment successful.');
+      await loadCards();
+    } catch (err) { alertBox.innerHTML = `<div class="alert alert-danger py-2 small">${Util.escapeHtml(err.message)}</div>`; }
+  });
+})();
+</script>
+</body>
+</html>

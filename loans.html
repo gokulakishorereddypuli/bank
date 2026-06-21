@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Loans · SecureTrust Bank</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="appShell"></div>
+
+<div class="modal fade" id="applyLoanModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Apply for a loan</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div id="loanAlert"></div>
+        <div class="mb-3">
+          <label class="form-label small fw-semibold">Loan type</label>
+          <select class="form-select" id="loanType">
+            <option value="personal">Personal Loan — 12% p.a.</option>
+            <option value="home">Home Loan — 8.5% p.a.</option>
+            <option value="vehicle">Vehicle Loan — 9.5% p.a.</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-semibold">Loan amount (₹)</label>
+          <input type="number" min="1" class="form-control" id="loanAmount">
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-semibold">Tenure (months)</label>
+          <input type="number" min="6" max="360" value="24" class="form-control" id="loanTenure">
+        </div>
+        <div class="alert alert-light border small mb-0" id="emiPreview">Estimated EMI: —</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-navy" id="applyLoanBtn">Submit Application</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/db.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/loans.js"></script>
+<script>
+let CURRENT_USER = null;
+
+function updateEmiPreview() {
+  const type = document.getElementById('loanType').value;
+  const amt = Number(document.getElementById('loanAmount').value) || 0;
+  const tenure = Number(document.getElementById('loanTenure').value) || 0;
+  const preview = document.getElementById('emiPreview');
+  if (amt > 0 && tenure > 0) {
+    const emi = Util.calcEMI(amt, Loans.rateFor(type), tenure);
+    preview.textContent = `Estimated EMI: ${Util.formatCurrency(emi)} / month at ${Loans.rateFor(type)}% p.a.`;
+  } else {
+    preview.textContent = 'Estimated EMI: —';
+  }
+}
+
+async function loadLoans() {
+  const loans = await Loans.listForCustomer(CURRENT_USER.id);
+  document.getElementById('pageContent').innerHTML = `
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <p class="text-muted mb-0 small">Personal, home and vehicle loans with instant EMI calculation</p>
+      <button class="btn btn-teal btn-sm" data-bs-toggle="modal" data-bs-target="#applyLoanModal"><i class="bi bi-plus-lg"></i> Apply for Loan</button>
+    </div>
+    <div class="card-soft p-3">
+      <div class="table-responsive">
+        <table class="table table-soft mb-0">
+          <thead><tr><th>Type</th><th>Principal</th><th>Rate</th><th>Tenure</th><th>EMI</th><th>Outstanding</th><th>Status</th><th>Applied</th></tr></thead>
+          <tbody>
+            ${loans.length ? loans.map(l => `
+              <tr>
+                <td class="text-capitalize">${l.type}</td>
+                <td>${Util.formatCurrency(l.principal)}</td>
+                <td>${l.rateAPR}%</td>
+                <td>${l.tenureMonths} mo</td>
+                <td>${Util.formatCurrency(l.emi)}</td>
+                <td>${Util.formatCurrency(l.outstandingPrincipal)}</td>
+                <td><span class="badge badge-${l.status}">${l.status}</span></td>
+                <td>${Util.formatDate(l.appliedAt, false)}</td>
+              </tr>`).join('') : `<tr><td colspan="8" class="empty-state">No loan applications yet</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+(async function init() {
+  await openDB();
+  CURRENT_USER = await Auth.requireAuth();
+  if (!CURRENT_USER) return;
+  if (CURRENT_USER.role === 'admin') { window.location.href = 'admin.html'; return; }
+  renderShell(CURRENT_USER, 'Loans');
+  await loadLoans();
+
+  ['loanType', 'loanAmount', 'loanTenure'].forEach(id => document.getElementById(id).addEventListener('input', updateEmiPreview));
+
+  document.getElementById('applyLoanBtn').addEventListener('click', async () => {
+    const alertBox = document.getElementById('loanAlert'); alertBox.innerHTML = '';
+    try {
+      await Loans.apply(CURRENT_USER.id, document.getElementById('loanType').value, document.getElementById('loanAmount').value, document.getElementById('loanTenure').value);
+      bootstrap.Modal.getInstance(document.getElementById('applyLoanModal')).hide();
+      Util.toast('Loan application submitted.');
+      document.getElementById('loanAmount').value = '';
+      await loadLoans();
+    } catch (err) { alertBox.innerHTML = `<div class="alert alert-danger py-2 small">${Util.escapeHtml(err.message)}</div>`; }
+  });
+})();
+</script>
+</body>
+</html>
